@@ -30,6 +30,13 @@
             touch-action: none;
         }
 
+        body.low-perf #ui-container {
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+            background: rgba(30, 30, 30, 0.95);
+            box-shadow: none;
+        }
+
         /* 隐藏的视频元素 */
         #input_video {
             position: absolute;
@@ -154,6 +161,37 @@
             border-color: #00d2ff;
         }
 
+        .mode-btn {
+            display: inline-block;
+            width: 48%;
+            padding: 8px 0;
+            margin: 0 1% 8px 0;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            color: #ddd;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+            text-align: center;
+        }
+
+        .mode-btn:active {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .mode-btn.active {
+            background: #00d2ff;
+            color: #000;
+            font-weight: bold;
+            border-color: #00d2ff;
+        }
+
+        .disabled {
+            opacity: 0.55;
+            pointer-events: none;
+        }
+
         /* 颜色选择器 */
         input[type="color"] {
             -webkit-appearance: none;
@@ -223,6 +261,73 @@
             display: none;
             max-width: 80%;
         }
+
+        /* 摄像头权限引导（无法修改系统弹窗按钮样式，用页面引导增强识别） */
+        #permission-hint {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.55);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2500;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+        }
+
+        #permission-hint.visible {
+            opacity: 1;
+        }
+
+        .permission-card {
+            width: min(520px, 92vw);
+            background: rgba(20, 20, 20, 0.92);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 18px;
+            padding: 22px 18px;
+            text-align: center;
+            box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        .permission-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 10px;
+            letter-spacing: 0.5px;
+        }
+
+        .permission-subtitle {
+            font-size: 16px;
+            color: rgba(255, 255, 255, 0.85);
+            line-height: 1.5;
+            margin-bottom: 14px;
+        }
+
+        .allow-badge {
+            display: inline-block;
+            padding: 14px 22px;
+            background: #007aff;
+            color: #fff;
+            font-size: 34px;
+            font-weight: 800;
+            border-radius: 16px;
+            box-shadow: 0 10px 24px rgba(0, 122, 255, 0.45);
+            letter-spacing: 2px;
+        }
+
+        .hint-arrow {
+            margin-top: 14px;
+            font-size: 44px;
+            color: rgba(255, 255, 255, 0.9);
+            animation: hintBounce 1s ease-in-out infinite;
+        }
+
+        @keyframes hintBounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
     </style>
 
     <!-- 引入 Three.js -->
@@ -252,12 +357,27 @@
                 <div class="shape-btn" data-shape="buddha">佛像(禅)</div>
                 <div class="shape-btn" data-shape="firework">烟花球</div>
                 <div class="shape-btn" data-shape="cc">CC字母</div>
+                <div class="shape-btn" data-shape="rainbow">彩虹</div>
             </div>
         </div>
 
         <div class="control-group">
             <label>粒子颜色</label>
+            <div id="color-modes">
+                <div class="mode-btn active" data-mode="solid">单色</div>
+                <div class="mode-btn" data-mode="rainbow">彩虹色</div>
+            </div>
             <input type="color" id="color-picker" value="#00d2ff">
+        </div>
+
+        <div class="control-group">
+            <label>性能模式 <span style="opacity:.7; float:right;" id="particle-count-label"></span></label>
+            <select id="quality-select" style="width:100%; padding:10px; border-radius:6px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.2); color:#fff;">
+                <option value="auto" selected>自动(推荐)</option>
+                <option value="high">高</option>
+                <option value="medium">中</option>
+                <option value="low">低(更流畅)</option>
+            </select>
         </div>
 
         <button id="fullscreen-btn">⛶ 全屏模式</button>
@@ -274,15 +394,118 @@
     <!-- 错误提示 -->
     <div id="error-msg"></div>
 
+    <!-- 摄像头权限引导 -->
+    <div id="permission-hint" aria-hidden="true">
+        <div class="permission-card">
+            <div class="permission-title">马上要用摄像头啦</div>
+            <div class="permission-subtitle">看到弹窗后，请点这个按钮：</div>
+            <div class="allow-badge">允许</div>
+            <div class="hint-arrow">↑</div>
+            <div class="permission-subtitle" style="margin-top:8px; opacity:.8;">（这是系统弹窗，页面无法改按钮颜色）</div>
+        </div>
+    </div>
+
     <!-- 隐藏的视频元素 -->
     <video id="input_video" playsinline webkit-playsinline muted autoplay></video>
 
 <script>
-    // ================= 配置参数 =================
-    const PARTICLE_COUNT = 10000; // 粒子数量
-    const PARTICLE_SIZE = 0.1; // 增大基础粒子尺寸以增强透视效果
+    // ================= 环境/性能自适配 =================
+    const MAX_PARTICLES = 10000;
+    const PARTICLE_SIZE_BASE = 0.1; // 基础粒子尺寸
     const TRANSITION_SPEED = 0.08;
     const HAND_SENSITIVITY = 0.15;
+
+    function getQueryParam(name) {
+        const url = new URL(window.location.href);
+        return url.searchParams.get(name);
+    }
+
+    function detectEnvironment() {
+        const ua = navigator.userAgent || '';
+        const isWeChat = /MicroMessenger/i.test(ua);
+        const isIOS = /iP(hone|ad|od)/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        const isIPad = /iPad/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1 && Math.max(screen.width, screen.height) >= 1024);
+        const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        return { isWeChat, isIOS, isIPad, prefersReducedMotion };
+    }
+
+    const ENV = detectEnvironment();
+
+    // 彩虹：赤橙黄绿青蓝紫（现实：红在外、紫在内）
+    const RAINBOW_COLORS = [
+        [1.0, 0.0, 0.0],       // red
+        [1.0, 0.5, 0.0],       // orange
+        [1.0, 1.0, 0.0],       // yellow
+        [0.0, 1.0, 0.0],       // green
+        [0.0, 1.0, 1.0],       // cyan (青)
+        [0.0, 0.0, 1.0],       // blue
+        [0.56, 0.0, 1.0]       // violet
+    ];
+    const RAINBOW_BANDS = 7;
+    const RAINBOW_BASE_R = 10;
+    const RAINBOW_BAND_SPACING = 0.9;
+    const RAINBOW_Y_OFFSET = 2.0;
+
+    function rainbowColorByIndex(idx) {
+        const i = Math.max(0, Math.min(RAINBOW_BANDS - 1, idx | 0));
+        return RAINBOW_COLORS[i];
+    }
+
+    function rainbowColorByT(t) {
+        const tt = Math.max(0, Math.min(0.999999, t));
+        const idx = Math.floor(tt * RAINBOW_BANDS);
+        return rainbowColorByIndex(idx);
+    }
+
+    const QUALITY_PRESETS = {
+        high: {
+            particleCount: 10000,
+            maxPixelRatio: 2,
+            antialias: true,
+            alpha: false,
+            fog: true,
+            depthTest: true,
+            renderIntervalMs: 0,
+            handFrameIntervalMs: 0,
+            particleUpdateIntervalMs: 0,
+            video: { width: 640, height: 480 }
+        },
+        medium: {
+            particleCount: 6500,
+            maxPixelRatio: 1.5,
+            antialias: false,
+            alpha: false,
+            fog: true,
+            depthTest: false,
+            renderIntervalMs: 16,
+            handFrameIntervalMs: 66,
+            particleUpdateIntervalMs: 16,
+            video: { width: 480, height: 360 }
+        },
+        low: {
+            particleCount: 3800,
+            maxPixelRatio: 1,
+            antialias: false,
+            alpha: false,
+            fog: false,
+            depthTest: false,
+            renderIntervalMs: 33,
+            handFrameIntervalMs: 100,
+            particleUpdateIntervalMs: 33,
+            video: { width: 320, height: 240 }
+        }
+    };
+
+    function resolveInitialTier() {
+        const forced = (getQueryParam('quality') || '').toLowerCase();
+        if (forced === 'high' || forced === 'medium' || forced === 'low') return forced;
+
+        if (ENV.prefersReducedMotion) return 'low';
+        if (ENV.isWeChat) return 'low';
+        if (ENV.isIOS && ENV.isIPad) return 'low';
+        if (ENV.isIOS) return 'medium';
+        return 'high';
+    }
 
     // ================= 全局变量 =================
     let scene, camera, renderer, particles, geometry, material;
@@ -290,6 +513,17 @@
     let targetPositions = [];
     let basePositions = [];
     let currentColor = new THREE.Color(0x00d2ff);
+    let colorMode = 'solid'; // solid | rainbow
+
+    let qualityMode = 'auto'; // auto | high | medium | low
+    let qualityTier = resolveInitialTier();
+    let quality = QUALITY_PRESETS[qualityTier];
+    let activeParticleCount = quality.particleCount;
+    let generatedCountForShape = 0;
+
+    let lastRenderTime = 0;
+    let lastParticleUpdateTime = 0;
+    let handTrackingEnabled = false;
 
     // 手势控制变量
     let handScaleFactor = 1.0;
@@ -304,6 +538,10 @@
     const scaleValEl = document.getElementById('scale-val');
     const errorMsg = document.getElementById('error-msg');
     const videoElement = document.getElementById('input_video');
+    const particleCountLabel = document.getElementById('particle-count-label');
+    const qualitySelect = document.getElementById('quality-select');
+    const fullscreenBtn = document.getElementById('fullscreen-btn');
+    const permissionHintEl = document.getElementById('permission-hint');
 
     // 控制面板显示状态
     let panelVisible = false;
@@ -311,8 +549,26 @@
     // ================= 启动流程 =================
     startBtn.addEventListener('click', async () => {
         try {
-            await initCamera();
-            await initMediaPipe();
+            startBtn.disabled = true;
+            startBtn.style.opacity = '0.85';
+            applyQuality(qualityTier);
+            showPermissionHint();
+
+            let cameraReady = false;
+            try {
+                await initCamera();
+                cameraReady = true;
+            } catch (e) {
+                hidePermissionHint();
+                handStateEl.innerText = '演示';
+                showError('未开启摄像头：已进入演示模式（无手势）', 3200);
+                console.warn('摄像头不可用，进入演示模式:', e);
+            }
+
+            if (cameraReady) {
+                await initMediaPipe();
+                handTrackingEnabled = true;
+            }
             initThree();
             
             startScreen.classList.add('hidden');
@@ -322,7 +578,18 @@
             
             animate();
         } catch (error) {
-            showError('需要摄像头权限才能捕捉手势,请刷新重试');
+            hidePermissionHint();
+            startBtn.disabled = false;
+            startBtn.style.opacity = '1';
+            if (ENV.isWeChat) {
+                showError('微信内置浏览器可能限制摄像头权限；建议右上角用 Safari 打开后重试');
+            } else {
+                if (error && (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError')) {
+                    showError('请在弹窗里点“允许”才能继续');
+                } else {
+                    showError('需要摄像头权限才能捕捉手势,请刷新重试');
+                }
+            }
             console.error('初始化失败:', error);
         }
     });
@@ -333,8 +600,8 @@
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: {
                     facingMode: 'user',
-                    width: { ideal: 640 },
-                    height: { ideal: 480 }
+                    width: { ideal: quality.video.width },
+                    height: { ideal: quality.video.height }
                 },
                 audio: false
             });
@@ -344,18 +611,35 @@
             // 确保视频加载完成
             await new Promise((resolve) => {
                 videoElement.onloadedmetadata = () => {
-                    videoElement.play();
+                    Promise.resolve(videoElement.play()).catch(() => {});
                     resolve();
                 };
             });
+
+            hidePermissionHint();
             
         } catch (error) {
-            throw new Error('摄像头访问失败');
+            throw error;
         }
     }
 
+    function showPermissionHint() {
+        if (!permissionHintEl) return;
+        permissionHintEl.classList.add('visible');
+        permissionHintEl.setAttribute('aria-hidden', 'false');
+    }
+
+    function hidePermissionHint() {
+        if (!permissionHintEl) return;
+        permissionHintEl.classList.remove('visible');
+        permissionHintEl.setAttribute('aria-hidden', 'true');
+    }
+
     // ================= MediaPipe 初始化 =================
-    let hands, cameraUtils;
+    let hands;
+    let lastHandFrameTime = 0;
+    let handBusy = false;
+    let handLoopActive = false;
     
     async function initMediaPipe() {
         hands = new Hands({
@@ -373,15 +657,30 @@
 
         hands.onResults(onHandsResults);
 
-        cameraUtils = new Camera(videoElement, {
-            onFrame: async () => {
-                await hands.send({image: videoElement});
-            },
-            width: 320,
-            height: 240
-        });
+        // 避免 camera_utils 的二次 getUserMedia（可能导致重复权限弹窗）
+        if (!handLoopActive) {
+            handLoopActive = true;
+            const loop = async () => {
+                if (!handLoopActive) return;
+                requestAnimationFrame(loop);
 
-        await cameraUtils.start();
+                if (!videoElement || videoElement.readyState < 2) return;
+                const now = performance.now();
+                if (quality.handFrameIntervalMs > 0 && now - lastHandFrameTime < quality.handFrameIntervalMs) return;
+                lastHandFrameTime = now;
+
+                if (handBusy) return;
+                handBusy = true;
+                try {
+                    await hands.send({ image: videoElement });
+                } catch (e) {
+                    // ignore transient errors (tab switching etc.)
+                } finally {
+                    handBusy = false;
+                }
+            };
+            requestAnimationFrame(loop);
+        }
     }
 
     // ================= 手势检测回调 =================
@@ -435,7 +734,9 @@
     // ================= Three.js 初始化 =================
     function initThree() {
         scene = new THREE.Scene();
-        scene.fog = new THREE.FogExp2(0x050505, 0.015); // 增强雾效密度
+        if (quality.fog) {
+            scene.fog = new THREE.FogExp2(0x050505, 0.015);
+        }
 
         camera = new THREE.PerspectiveCamera(
             60, // 减小FOV增强透视感
@@ -447,55 +748,72 @@
         camera.position.y = 2;
 
         renderer = new THREE.WebGLRenderer({ 
-            antialias: true, 
-            alpha: true,
+            antialias: quality.antialias,
+            alpha: quality.alpha,
             powerPreference: "high-performance"
         });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, quality.maxPixelRatio));
+        renderer.setClearColor(0x050505, 1);
         document.body.appendChild(renderer.domElement);
 
         // 创建粒子系统
         geometry = new THREE.BufferGeometry();
-        const positions = new Float32Array(PARTICLE_COUNT * 3);
+        const positions = new Float32Array(MAX_PARTICLES * 3);
 
-        for (let i = 0; i < PARTICLE_COUNT * 3; i++) {
+        for (let i = 0; i < MAX_PARTICLES * 3; i++) {
             positions[i] = (Math.random() - 0.5) * 50;
         }
 
         geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setDrawRange(0, activeParticleCount);
 
         material = new THREE.PointsMaterial({
             color: currentColor,
-            size: PARTICLE_SIZE,
+            size: PARTICLE_SIZE_BASE * (qualityTier === 'low' ? 1.15 : 1),
             sizeAttenuation: true, // 启用透视衰减,近大远小
             blending: THREE.AdditiveBlending,
             depthWrite: false,
-            depthTest: true, // 启用深度测试增强层次感
+            depthTest: quality.depthTest,
             transparent: true,
             opacity: 0.9,
             vertexColors: false,
-            fog: true // 启用雾效增强深度
+            fog: quality.fog
         });
 
         particles = new THREE.Points(geometry, material);
         scene.add(particles);
 
-        targetPositions = new Float32Array(PARTICLE_COUNT * 3);
-        basePositions = new Float32Array(PARTICLE_COUNT * 3);
+        targetPositions = new Float32Array(MAX_PARTICLES * 3);
+        basePositions = new Float32Array(MAX_PARTICLES * 3);
 
         generateShape('heart');
+        updateParticleCountLabel();
+        updateFullscreenButton();
 
         window.addEventListener('resize', onWindowResize);
         
-        // 点击切换面板 (点击canvas)
-        renderer.domElement.addEventListener('click', togglePanel);
+        // 点击切换面板 (点击canvas) - 避免 touch/pointer 重复触发
+        let lastToggleAt = 0;
+        const onToggleIntent = (e) => {
+            const t = performance.now();
+            if (t - lastToggleAt < 250) return;
+            lastToggleAt = t;
+            togglePanel(e);
+        };
+        if ('PointerEvent' in window) {
+            renderer.domElement.addEventListener('pointerdown', onToggleIntent, { passive: true });
+        } else {
+            renderer.domElement.addEventListener('touchstart', onToggleIntent, { passive: true });
+            renderer.domElement.addEventListener('click', onToggleIntent, { passive: true });
+        }
     }
 
     function onWindowResize() {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, quality.maxPixelRatio));
     }
 
     // ================= 切换控制面板 =================
@@ -640,6 +958,33 @@
                 }
                 break;
 
+            case 'rainbow':
+                {
+                    // 彩虹拱形 + 两侧云朵
+                    const band = Math.floor(Math.random() * RAINBOW_BANDS);
+                    const r = RAINBOW_BASE_R + band * RAINBOW_BAND_SPACING + (Math.random() - 0.5) * 0.35;
+                    const angle = Math.random() * Math.PI; // 0..PI
+
+                    x = r * Math.cos(angle);
+                    y = r * Math.sin(angle) - RAINBOW_Y_OFFSET;
+                    z = (Math.random() - 0.5) * 2.2;
+
+                    // 少量云朵点
+                    if (Math.random() < 0.18) {
+                        const side = Math.random() < 0.5 ? -1 : 1;
+                        const cx = side * (RAINBOW_BASE_R + (RAINBOW_BANDS - 1) * RAINBOW_BAND_SPACING * 0.5);
+                        const cy = -RAINBOW_Y_OFFSET + 0.5;
+                        const cz = 0;
+                        const cr = 2.2 * Math.cbrt(Math.random());
+                        const cTheta = Math.random() * Math.PI * 2;
+                        const cPhi = Math.acos(2 * Math.random() - 1);
+                        x = cx + cr * Math.sin(cPhi) * Math.cos(cTheta);
+                        y = cy + cr * Math.sin(cPhi) * Math.sin(cTheta);
+                        z = cz + cr * Math.cos(cPhi);
+                    }
+                }
+                break;
+
             default:
                 x = y = z = 0;
         }
@@ -649,13 +994,22 @@
 
     function generateShape(shapeType) {
         currentShape = shapeType;
+        generatedCountForShape = 0;
+        ensureShapeGenerated(activeParticleCount);
+        if (colorMode === 'rainbow') updateRainbowColors();
+    }
 
-        for (let i = 0; i < PARTICLE_COUNT; i++) {
-            const p = getPointOnShape(shapeType, i, PARTICLE_COUNT);
+    function ensureShapeGenerated(count) {
+        if (count <= generatedCountForShape) return;
+
+        for (let i = generatedCountForShape; i < count; i++) {
+            const p = getPointOnShape(currentShape, i, count);
             basePositions[i * 3] = p.x;
             basePositions[i * 3 + 1] = p.y;
             basePositions[i * 3 + 2] = p.z;
         }
+
+        generatedCountForShape = count;
     }
 
     // ================= UI 交互 =================
@@ -671,29 +1025,178 @@
 
     const colorPicker = document.getElementById('color-picker');
     colorPicker.addEventListener('input', (e) => {
+        if (colorMode === 'rainbow') return;
         currentColor.set(e.target.value);
         if (material) {
-            material.color = currentColor;
-            material.needsUpdate = true;
+            material.color.copy(currentColor);
         }
     });
 
-    document.getElementById('fullscreen-btn').addEventListener('click', () => {
-        if (!document.fullscreenElement) {
-            document.documentElement.requestFullscreen();
+    document.getElementById('color-modes').addEventListener('click', (e) => {
+        if (!e.target.classList.contains('mode-btn')) return;
+        document.querySelectorAll('#color-modes .mode-btn').forEach(b => b.classList.remove('active'));
+        e.target.classList.add('active');
+        setColorMode(e.target.getAttribute('data-mode'));
+    });
+
+    function setColorMode(mode) {
+        colorMode = mode === 'rainbow' ? 'rainbow' : 'solid';
+        if (colorMode === 'rainbow') {
+            colorPicker.classList.add('disabled');
         } else {
-            if (document.exitFullscreen) {
-                document.exitFullscreen();
+            colorPicker.classList.remove('disabled');
+        }
+        if (!material || !geometry) return;
+
+        if (colorMode === 'rainbow') {
+            updateRainbowColors();
+            material.vertexColors = true;
+            // vertexColors 会与 material.color 相乘；设为白色避免染色导致“颜色变少”
+            material.color.set(0xffffff);
+        } else {
+            material.vertexColors = false;
+            material.color.copy(currentColor);
+        }
+        material.needsUpdate = true;
+    }
+
+    function updateRainbowColors() {
+        if (!geometry) return;
+        let colorAttr = geometry.getAttribute('color');
+        if (!colorAttr) {
+            colorAttr = new THREE.BufferAttribute(new Float32Array(MAX_PARTICLES * 3), 3);
+            geometry.setAttribute('color', colorAttr);
+        }
+
+        const colorArray = colorAttr.array;
+        for (let i = 0; i < activeParticleCount; i++) {
+            const ix = i * 3;
+            const x = basePositions[ix];
+            const y = basePositions[ix + 1];
+
+            let rgb;
+            if (currentShape === 'rainbow') {
+                // 现实彩虹：红在外、紫在内；按半径分层
+                const rr = Math.sqrt(x * x + (y + RAINBOW_Y_OFFSET) * (y + RAINBOW_Y_OFFSET));
+                const band = Math.round((rr - RAINBOW_BASE_R) / RAINBOW_BAND_SPACING);
+                // rr 越大越外侧 => 越红；band 0 是内侧 => 紫
+                const idx = (RAINBOW_BANDS - 1) - Math.max(0, Math.min(RAINBOW_BANDS - 1, band));
+                rgb = rainbowColorByIndex(idx);
+            } else {
+                // 其他造型：按高度分区为赤橙黄绿青蓝紫
+                // （避免强依赖 HSL，iOS 老设备更省）
+                // 先做一次扫描获取 min/max（惰性：只在非彩虹造型时做）
+                if (i === 0) {
+                    let minY = Infinity;
+                    let maxY = -Infinity;
+                    for (let j = 0; j < activeParticleCount; j++) {
+                        const yy = basePositions[j * 3 + 1];
+                        if (yy < minY) minY = yy;
+                        if (yy > maxY) maxY = yy;
+                    }
+                    updateRainbowColors._minY = minY;
+                    updateRainbowColors._spanY = Math.max(1e-6, maxY - minY);
+                }
+                const t = (y - (updateRainbowColors._minY || 0)) / (updateRainbowColors._spanY || 1);
+                rgb = rainbowColorByT(t);
             }
+
+            colorArray[ix] = rgb[0];
+            colorArray[ix + 1] = rgb[1];
+            colorArray[ix + 2] = rgb[2];
+        }
+
+        colorAttr.needsUpdate = true;
+    }
+
+    qualitySelect.addEventListener('change', () => {
+        qualityMode = qualitySelect.value;
+        if (qualityMode === 'auto') {
+            applyQuality(resolveInitialTier());
+        } else {
+            applyQuality(qualityMode);
         }
     });
+
+    function updateParticleCountLabel() {
+        particleCountLabel.innerText = `${activeParticleCount} 粒子`;
+    }
+
+    function applyQuality(tier) {
+        qualityTier = tier;
+        quality = QUALITY_PRESETS[qualityTier] || QUALITY_PRESETS.low;
+        activeParticleCount = Math.min(MAX_PARTICLES, quality.particleCount);
+
+        document.body.classList.toggle('low-perf', qualityTier === 'low');
+        updateParticleCountLabel();
+
+        if (scene) {
+            scene.fog = quality.fog ? new THREE.FogExp2(0x050505, 0.015) : null;
+        }
+
+        if (renderer) {
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, quality.maxPixelRatio));
+        }
+
+        if (geometry) {
+            geometry.setDrawRange(0, activeParticleCount);
+        }
+
+        if (material) {
+            material.depthTest = quality.depthTest;
+            material.fog = quality.fog;
+            material.size = PARTICLE_SIZE_BASE * (qualityTier === 'low' ? 1.15 : 1);
+            material.needsUpdate = true;
+        }
+
+        if (basePositions && currentShape) {
+            ensureShapeGenerated(activeParticleCount);
+            if (colorMode === 'rainbow') updateRainbowColors();
+        }
+    }
+
+    document.getElementById('fullscreen-btn').addEventListener('click', () => {
+        try {
+            if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen();
+            } else if (document.exitFullscreen) {
+                document.exitFullscreen();
+            }
+        } catch (e) {
+            showError('当前浏览器不支持全屏');
+        }
+    });
+
+    document.addEventListener('fullscreenchange', () => {
+        updateFullscreenButton();
+    });
+
+    function updateFullscreenButton() {
+        if (!fullscreenBtn) return;
+        const supported = !!document.documentElement.requestFullscreen && !!document.exitFullscreen;
+        const disabled = !supported || ENV.isWeChat;
+        fullscreenBtn.disabled = disabled;
+        fullscreenBtn.classList.toggle('disabled', disabled);
+        fullscreenBtn.textContent = disabled ? '全屏不可用' : '⛶ 全屏模式';
+    }
 
     // ================= 动画循环 =================
     function animate() {
         requestAnimationFrame(animate);
 
+        const now = performance.now();
+        if (quality.renderIntervalMs > 0 && now - lastRenderTime < quality.renderIntervalMs) {
+            return;
+        }
+        lastRenderTime = now;
+
         // 平滑手势缩放
-        handScaleFactor += (targetHandScale - handScaleFactor) * HAND_SENSITIVITY;
+        if (handTrackingEnabled) {
+            handScaleFactor += (targetHandScale - handScaleFactor) * HAND_SENSITIVITY;
+        } else {
+            targetHandScale = 1.0;
+            handScaleFactor += (1.0 - handScaleFactor) * 0.08;
+        }
         scaleValEl.innerText = handScaleFactor.toFixed(2);
 
         // 更新粒子位置
@@ -707,32 +1210,47 @@
             particles.rotation.z += (0 - particles.rotation.z) * 0.05;
         }
 
-        for (let i = 0; i < PARTICLE_COUNT; i++) {
-            const ix = i * 3;
-            const iy = i * 3 + 1;
-            const iz = i * 3 + 2;
+        const doParticleUpdate = !(quality.particleUpdateIntervalMs > 0 && now - lastParticleUpdateTime < quality.particleUpdateIntervalMs);
+        if (doParticleUpdate) lastParticleUpdateTime = now;
 
-            const bx = basePositions[ix];
-            const by = basePositions[iy];
-            const bz = basePositions[iz];
+        if (doParticleUpdate) {
+            for (let i = 0; i < activeParticleCount; i++) {
+                const ix = i * 3;
+                const iy = i * 3 + 1;
+                const iz = i * 3 + 2;
 
-            const tx = bx * handScaleFactor;
-            const ty = by * handScaleFactor;
-            const tz = bz * handScaleFactor;
+                const bx = basePositions[ix];
+                const by = basePositions[iy];
+                const bz = basePositions[iz];
 
-            positions[ix] += (tx - positions[ix]) * TRANSITION_SPEED;
-            positions[iy] += (ty - positions[iy]) * TRANSITION_SPEED;
-            positions[iz] += (tz - positions[iz]) * TRANSITION_SPEED;
+                const tx = bx * handScaleFactor;
+                const ty = by * handScaleFactor;
+                const tz = bz * handScaleFactor;
+
+                positions[ix] += (tx - positions[ix]) * TRANSITION_SPEED;
+                positions[iy] += (ty - positions[iy]) * TRANSITION_SPEED;
+                positions[iz] += (tz - positions[iz]) * TRANSITION_SPEED;
+            }
         }
 
-        particles.geometry.attributes.position.needsUpdate = true;
+        if (doParticleUpdate) particles.geometry.attributes.position.needsUpdate = true;
         renderer.render(scene, camera);
     }
 
     // ================= 错误提示 =================
-    function showError(message) {
+    let errorTimer = null;
+    function showError(message, autoHideMs = 0) {
         errorMsg.textContent = message;
         errorMsg.style.display = 'block';
+        if (errorTimer) {
+            clearTimeout(errorTimer);
+            errorTimer = null;
+        }
+        if (autoHideMs > 0) {
+            errorTimer = setTimeout(() => {
+                errorMsg.style.display = 'none';
+            }, autoHideMs);
+        }
     }
 
 </script>
