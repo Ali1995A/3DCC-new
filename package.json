@@ -1,0 +1,26 @@
+{
+  "name": "3dcc-particle-system",
+  "version": "1.0.0",
+  "description": "3D手势粒子交互系统 - 基于Three.js和MediaPipe的手势控制3D粒子效果",
+  "main": "index.html",
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "echo 'Static site - no build step required'",
+    "start": "vercel dev"
+  },
+  "keywords": [
+    "three.js",
+    "particles",
+    "hand-tracking",
+    "mediapipe",
+    "3d",
+    "interactive",
+    "gesture-control"
+  ],
+  "author": "3DCC Team",
+  "license": "MIT",
+  "vercel": {
+    "buildCommand": "echo 'Static site - no build step required'",
+    "outputDirectory": "."
+  }
+}
