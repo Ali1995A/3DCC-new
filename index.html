@@ -607,16 +607,13 @@
             });
             
             videoElement.srcObject = stream;
-            
-            // 确保视频加载完成
-            await new Promise((resolve) => {
-                videoElement.onloadedmetadata = () => {
-                    Promise.resolve(videoElement.play()).catch(() => {});
-                    resolve();
-                };
-            });
-
+            // 一旦拿到流，说明已授权；立刻隐藏引导，避免 iOS/微信下事件不触发导致卡住
             hidePermissionHint();
+            showPermissionHint._pending = false;
+            
+            // 确保视频进入可用状态（微信 iOS 可能不触发 onloadedmetadata）
+            await waitForVideoReady(videoElement, 1500);
+            Promise.resolve(videoElement.play()).catch(() => {});
             
         } catch (error) {
             throw error;
@@ -627,12 +624,41 @@
         if (!permissionHintEl) return;
         permissionHintEl.classList.add('visible');
         permissionHintEl.setAttribute('aria-hidden', 'false');
+        showPermissionHint._pending = true;
     }
 
     function hidePermissionHint() {
         if (!permissionHintEl) return;
         permissionHintEl.classList.remove('visible');
         permissionHintEl.setAttribute('aria-hidden', 'true');
+    }
+
+    async function waitForVideoReady(video, timeoutMs) {
+        if (!video) return;
+        if (video.readyState >= 2) return;
+
+        await new Promise((resolve) => {
+            let done = false;
+            const finish = () => {
+                if (done) return;
+                done = true;
+                cleanup();
+                resolve();
+            };
+            const cleanup = () => {
+                video.removeEventListener('loadedmetadata', finish);
+                video.removeEventListener('loadeddata', finish);
+                video.removeEventListener('canplay', finish);
+                video.removeEventListener('playing', finish);
+            };
+
+            video.addEventListener('loadedmetadata', finish, { once: true });
+            video.addEventListener('loadeddata', finish, { once: true });
+            video.addEventListener('canplay', finish, { once: true });
+            video.addEventListener('playing', finish, { once: true });
+
+            setTimeout(finish, timeoutMs);
+        });
     }
 
     // ================= MediaPipe 初始化 =================
