@@ -524,11 +524,29 @@
     let lastRenderTime = 0;
     let lastParticleUpdateTime = 0;
     let handTrackingEnabled = false;
+    let autoRotY = 0;
 
     // 手势控制变量
     let handScaleFactor = 1.0;
     let targetHandScale = 1.0;
     let isHandDetected = false;
+
+    // 旋转/平移控制（单手，基于手掌中心位置）
+    let targetHandRotX = 0;
+    let targetHandRotY = 0;
+    let handRotX = 0;
+    let handRotY = 0;
+
+    let targetHandPanX = 0;
+    let targetHandPanY = 0;
+    let handPanX = 0;
+    let handPanY = 0;
+
+    const HAND_ROTATE_MAX_X = 0.65; // 上下倾斜最大弧度
+    const HAND_ROTATE_MAX_Y = 1.2;  // 左右旋转最大弧度
+    const HAND_PAN_MAX_X = 10;      // 左右平移范围
+    const HAND_PAN_MAX_Y = 6;       // 上下平移范围
+    const HAND_DEADZONE = 0.06;     // 抗抖动死区
 
     // UI 元素
     const startScreen = document.getElementById('start-screen');
@@ -748,12 +766,44 @@
 
             targetHandScale = minScale + normalized * (maxScale - minScale);
 
+            // 旋转/平移：使用“手掌中心”相对屏幕中心的位置
+            // 选取掌心周围点求平均，稳定且成本低
+            const palmIdx = [0, 5, 9, 13, 17];
+            let cx = 0, cy = 0;
+            for (let i = 0; i < palmIdx.length; i++) {
+                const lm = landmarks[palmIdx[i]];
+                cx += lm.x;
+                cy += lm.y;
+            }
+            cx /= palmIdx.length;
+            cy /= palmIdx.length;
+
+            // 映射到 [-1, 1]，y 方向取反（向上为正）
+            let dx = (cx - 0.5) * 2;
+            let dy = (0.5 - cy) * 2;
+
+            // 死区
+            if (Math.abs(dx) < HAND_DEADZONE) dx = 0;
+            if (Math.abs(dy) < HAND_DEADZONE) dy = 0;
+
+            // 旋转：左右 -> 绕Y轴，上下 -> 绕X轴
+            targetHandRotY = dx * HAND_ROTATE_MAX_Y;
+            targetHandRotX = dy * HAND_ROTATE_MAX_X;
+
+            // 平移：左右/上下
+            targetHandPanX = dx * HAND_PAN_MAX_X;
+            targetHandPanY = dy * HAND_PAN_MAX_Y;
+
             // 更新UI
             handStateEl.innerText = normalized < 0.2 ? "合拢" : (normalized > 0.8 ? "张开" : "运动中");
         } else {
             isHandDetected = false;
             handStateEl.innerText = "未检测";
             targetHandScale = 1.0;
+            targetHandRotX = 0;
+            targetHandRotY = 0;
+            targetHandPanX = 0;
+            targetHandPanY = 0;
         }
     }
 
@@ -1225,10 +1275,25 @@
         }
         scaleValEl.innerText = handScaleFactor.toFixed(2);
 
+        // 平滑手势旋转/平移（未启用或未检测时自动回正）
+        const rotLerp = handTrackingEnabled && isHandDetected ? 0.14 : 0.08;
+        const panLerp = handTrackingEnabled && isHandDetected ? 0.12 : 0.08;
+        handRotX += (targetHandRotX - handRotX) * rotLerp;
+        handRotY += (targetHandRotY - handRotY) * rotLerp;
+        handPanX += (targetHandPanX - handPanX) * panLerp;
+        handPanY += (targetHandPanY - handPanY) * panLerp;
+
         // 更新粒子位置
         const positions = particles.geometry.attributes.position.array;
 
-        particles.rotation.y += 0.002;
+        // 自动旋转 + 手势旋转（手势作为偏移量，不累积漂移）
+        autoRotY += 0.002;
+        particles.rotation.x += (handRotX - particles.rotation.x) * 0.08;
+        particles.rotation.y += ((autoRotY + handRotY) - particles.rotation.y) * 0.08;
+
+        // 手势平移（整体平移，不影响形状插值）
+        particles.position.x += (handPanX - particles.position.x) * 0.08;
+        particles.position.y += (handPanY - particles.position.y) * 0.08;
         
         if (currentShape === 'saturn') {
             particles.rotation.z = 0.3;
