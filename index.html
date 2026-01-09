@@ -900,6 +900,36 @@
     });
 
     // ================= 形状生成算法 =================
+    function randomUnitVector() {
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        return {
+            x: Math.sin(phi) * Math.cos(theta),
+            y: Math.sin(phi) * Math.sin(theta),
+            z: Math.cos(phi),
+        };
+    }
+
+    function sampleSphereVolume(cx, cy, cz, radius, sx = 1, sy = 1, sz = 1) {
+        const dir = randomUnitVector();
+        const r = radius * Math.cbrt(Math.random());
+        return {
+            x: cx + dir.x * r * sx,
+            y: cy + dir.y * r * sy,
+            z: cz + dir.z * r * sz,
+        };
+    }
+
+    function sampleSphereShell(cx, cy, cz, radius, jitter = 0, sx = 1, sy = 1, sz = 1) {
+        const dir = randomUnitVector();
+        const r = radius + (Math.random() - 0.5) * jitter;
+        return {
+            x: cx + dir.x * r * sx,
+            y: cy + dir.y * r * sy,
+            z: cz + dir.z * r * sz,
+        };
+    }
+
     function getPointOnShape(type, idx, total) {
         const u = Math.random();
         const v = Math.random();
@@ -960,16 +990,28 @@
             case 'buddha':
                 {
                     const dice = Math.random();
-                    if (dice < 0.15) {
-                        const r = 2.5 * Math.cbrt(Math.random());
-                        x = r * Math.sin(phi) * Math.cos(theta);
-                        y = r * Math.sin(phi) * Math.sin(theta) + 6;
-                        z = r * Math.cos(phi);
-                    } else if (dice < 0.55) {
-                        const r = 4.0 * Math.cbrt(Math.random());
-                        x = r * Math.sin(phi) * Math.cos(theta);
-                        y = (r * Math.sin(phi) * Math.sin(theta)) * 1.2;
-                        z = r * Math.cos(phi) * 0.8;
+
+                    // 头部（球体）+ 米老鼠耳朵（球壳）
+                    const headCenterX = 0, headCenterY = 6, headCenterZ = 0;
+                    const earOffsetX = 2.9, earOffsetY = 8.6;
+                    const earRadius = 1.35;
+
+                    if (dice < 0.10) {
+                        // 左耳：球壳
+                        const p = sampleSphereShell(-earOffsetX, earOffsetY, headCenterZ, earRadius, 0.12);
+                        x = p.x; y = p.y; z = p.z;
+                    } else if (dice < 0.20) {
+                        // 右耳：球壳
+                        const p = sampleSphereShell(earOffsetX, earOffsetY, headCenterZ, earRadius, 0.12);
+                        x = p.x; y = p.y; z = p.z;
+                    } else if (dice < 0.38) {
+                        // 头部：实心球
+                        const p = sampleSphereVolume(headCenterX, headCenterY, headCenterZ, 2.5);
+                        x = p.x; y = p.y; z = p.z;
+                    } else if (dice < 0.78) {
+                        // 躯干：略拉伸的实心球
+                        const p = sampleSphereVolume(0, 0, 0, 4.0, 1, 1.2, 0.8);
+                        x = p.x; y = p.y; z = p.z;
                     } else {
                         const r = 5.5 * Math.sqrt(Math.random());
                         x = r * Math.cos(theta);
